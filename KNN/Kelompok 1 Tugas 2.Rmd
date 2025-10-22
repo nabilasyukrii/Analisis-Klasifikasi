@@ -1,0 +1,807 @@
+---
+title: "Tugas 2 Pemklas"
+author: "Nabila Syukri"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(tidyverse)
+library(tidymodels)
+library(DataExplorer)
+library(kknn)
+```
+
+# Import Data
+
+```{r}
+df <- read_excel("C:/Users/nabil/Downloads/Pemodelan Klasifikasi/Data Tugas-2.xlsx")
+str(df)
+```
+
+```{r}
+df <- df %>% 
+  select(-Nomor)
+glimpse(df)
+```
+
+Filter provinsi DKI, DIY, Bali, Banten
+
+```{r}
+df <- df %>%
+  filter(Provinsi %in% c("Prov. D.K.I. Jakarta",
+                         "Prov. D.I. Yogyakarta",
+                         "Prov. Bali",
+                         "Prov. Banten"))
+
+# cek hasil
+df %>% count(Provinsi)
+
+# hitung jumlah per provinsi
+prov_count <- df %>%
+  count(Provinsi)
+```
+
+# Eksplorasi Data
+
+```{r}
+summary(df[, c("Lit_2023","Num_2023","Lit_2024","Num_2024")])
+
+```
+
+```{r}
+df <- df %>% 
+      mutate(across(where(is.character),as.factor))
+```
+
+Cek Missing Value
+
+```{r}
+plot_intro(df,theme_config = theme_classic())
+```
+
+Ubah Kolom "Peringkat Akreditasi" jadi Y biar lebih gampang
+
+```{r}
+df <- df %>%
+  rename(Y = `Peringkat Akreditasi`)
+```
+
+Barplot Frekuensi Peringkat Akreditasi
+
+```{r}
+ggplot(df, aes(x = Y, fill = Y)) +
+  geom_bar() +
+  labs(title = "Frekuensi Peringkat Akreditasi",
+       x = "Peringkat Akreditasi",
+       y = "Frekuensi") +
+  scale_fill_brewer(palette = "Oranges") +
+  theme_classic()
+```
+
+hapus observasi pada kelas "Tidak Terakreditasi" karena terlalu sedikit
+
+```{r}
+TTA <- df %>%
+  filter(Y == "Tidak Terakreditasi")
+TTA
+```
+
+```{r}
+df <- df %>%
+  filter(Y != "Tidak Terakreditasi") %>%
+  droplevels()
+
+```
+
+```{r}
+# Hitung frekuensi + proporsi
+freq_tab <- df %>%
+  count(Y) %>%
+  mutate(prop = n / sum(n) * 100)
+
+# Plot
+ggplot(freq_tab, aes(x = Y, y = n, fill = Y)) +
+  geom_col() +
+  geom_text(aes(label = paste0(n, " (", round(prop,1), "%)")),
+            vjust = -0.5, size = 4) +
+  labs(title = "Frekuensi Peringkat Akreditasi",
+       x = "Peringkat Akreditasi",
+       y = "Frekuensi") +
+  scale_fill_brewer(palette = "Oranges") +
+  theme_classic()
+```
+
+Boxplot sebaran nilai peubah terhadap kelas Y
+
+```{r}
+plot_boxplot(data = df,
+             by = "Y",
+             geom_boxplot_args = list(fill="#03A9F4"),
+             ggtheme = theme_classic())
+```
+
+Frekuensi Peringkat Akreditasi per Provinsi
+
+```{r}
+df %>%
+  count(Provinsi, Y) %>%
+  arrange(Provinsi, desc(n)) %>%
+  ggplot(aes(x = Provinsi, y = n, fill = Y)) +
+  geom_col(position = "stack") +
+  scale_fill_brewer(palette = "Oranges") +
+  labs(title = "Distribusi Peringkat Akreditasi per Provinsi",
+       x = "Provinsi",
+       y = "Frekuensi") +
+  theme_minimal() +  # background putih polos, no grid
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        legend.background = element_blank())
+
+```
+
+```{r}
+library(corrplot)
+cor_mat <- df %>%
+  select(Lit_2023, Num_2023, Lit_2024, Num_2024) %>%
+  cor(use = "complete.obs")
+
+corrplot(cor_mat, method = "color", type = "upper", 
+         addCoef.col = "white", number.cex = 0.7, 
+         tl.col = "black", tl.srt = 45)
+
+```
+
+# KNN
+
+untuk analisis klasifikasi kolom Provinsi tidak digunakan sebagai variabel prediktor
+
+```{r}
+df<-df %>% 
+select(-Provinsi)
+```
+
+## Split data
+
+```{r}
+set.seed(123)
+holdout_split <- initial_split(df,
+                               #sampel acak berdasarkan kelompok
+                               strata = Y,
+                               # proporsi untuk training data
+                               prop = 0.8)
+train_data <- training(holdout_split)
+test_data <- testing(holdout_split)
+```
+
+```{r}
+library(patchwork) # biar bisa gabung plot
+
+# distribusi train
+p_train <- train_data %>%
+  count(Y) %>%
+  ggplot(aes(x = Y, y = n, fill = Y)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Oranges") +
+  labs(title = "Distribusi Y - Training Set", x = "Kelas", y = "Jumlah") +
+  theme_minimal()
+
+# distribusi test
+p_test <- test_data %>%
+  count(Y) %>%
+  ggplot(aes(x = Y, y = n, fill = Y)) +
+  geom_col() +
+  labs(title = "Distribusi Y - Testing Set", x = "Kelas", y = "Jumlah") +
+  scale_fill_brewer(palette = "Oranges") +
+  theme_minimal()
+
+# gabungkan plot
+p_train + p_test
+
+```
+
+Pembagian data berdasarkan strata Y, jadi train dan test proporsinya sama setiap kelas
+
+karena tadi kelasnya imbalance coba kita pakai SMOTE
+
+```{r}
+
+library(themis) # untuk SMOTE
+
+set.seed(123)
+
+# Bagi data train/test
+holdout_split <- initial_split(df, prop = 0.8, strata = Y)
+train_data <- training(holdout_split)
+test_data  <- testing(holdout_split)
+
+# Recipe dengan SMOTE (hanya diterapkan di train)
+smote_recipe <- recipe(Y ~ ., data = train_data) %>%
+  step_smote(Y) #lakukan SMOTE
+ 
+
+# Periksa hasil prep
+smote_prep <- prep(smote_recipe)
+train_smote <- juice(smote_prep) # train yang sudah di-SMOTE
+test_clean  <- bake(smote_prep, new_data = test_data) # test tetap original
+
+# Cek distribusi kelas
+table(train_data$Y)
+table(train_smote$Y)
+table(test_clean$Y)  # tidak berubah
+
+```
+
+lihat distribusi data sintetis hasil SMOTE
+
+```{r}
+
+# Gabungkan train asli dan train hasil SMOTE
+plot_data <- bind_rows(
+  train_data %>% mutate(type = "Asli"),
+  train_smote %>% mutate(type = "SMOTE")
+)
+
+# Scatter plot
+ggplot(plot_data, aes(x = Lit_2023, y = Num_2023, color = Y, shape = type)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Visualisasi Data Asli vs Hasil SMOTE",
+       x = "Literasi 2023", y = "Numerasi 2023") +
+  theme_minimal()
+
+```
+
+```{r}
+tidy(holdout_split) %>% 
+  count(Data) %>% 
+  mutate(percent=n*100/sum(n))
+```
+
+```{r}
+
+df %>% 
+  mutate(Row=seq(nrow(df))) %>% 
+  select(Y,Row) %>% 
+  left_join(y = tidy(holdout_split),by = "Row") %>% 
+  count(Y,Data) %>% 
+  group_by(Y) %>% 
+  mutate(percent=n*100/sum(n),n=NULL) %>% 
+  pivot_wider(id_cols = Y,names_from = Data,values_from = percent)
+```
+
+```{r}
+set.seed(345)
+folds <- vfold_cv(df, v = 10,strata = "Y" )
+```
+
+```{r}
+tidy(folds) %>% 
+  filter(Row<700) %>% 
+ggplot(aes(x = Fold, y = Row,fill = Data)) +
+    geom_tile()+
+  scale_fill_brewer(palette = "Oranges") +
+  theme_classic()
+```
+
+```{r}
+df %>% 
+  mutate(Row=seq(nrow(df))) %>% 
+  select(Y,Row) %>% 
+  left_join(tidy(folds),by="Row")%>% 
+  count(Y,Fold,Data) %>% 
+  group_by(Y,Fold) %>% 
+  mutate(percent=n*100/sum(n)) %>% 
+  arrange(Fold,Data)
+```
+
+```{r}
+knn <- nearest_neighbor(neighbors=7,weight_func="rectangular",dist_power = 2) %>% 
+  set_engine("kknn") %>%
+  set_mode("classification")
+knn
+```
+
+```{r}
+knn %>% translate()
+```
+
+```{r}
+knn_hold <- knn %>% 
+  fit(Y~.,data=train_smote)
+```
+
+```{r}
+extract_fit_engine(knn_hold)
+```
+
+```{r}
+pred_knn <- knn_hold %>% 
+              predict(new_data = test_data) %>% 
+              bind_cols(test_data %>% select(Y))
+              
+pred_knn %>% 
+  slice_head(n=10)
+```
+
+```{r}
+confussion_matrix <- pred_knn %>%
+                      conf_mat(truth=Y,estimate=.pred_class)
+autoplot(confussion_matrix,type = "heatmap")+
+  scale_fill_viridis_c(direction = -1,option = "inferno",alpha = 0.6)
+```
+
+```{r}
+pred_knn %>%
+  conf_mat(truth=Y,estimate=.pred_class) %>% 
+  summary()
+```
+
+```{r}
+pred_knn %>% 
+  accuracy(truth=Y,estimate=.pred_class)
+```
+
+## K-Fold Cross Validation
+
+```{r}
+no_prep <- recipe(Y~.,data=df)
+```
+
+```{r}
+smote_rec <- recipe(Y ~ ., data = df) %>%
+  step_smote(Y)
+
+```
+
+```{r}
+wfst0 <- workflow_set(preproc = list(no_prep=no_prep),models = list(knn=knn))
+```
+
+```{r}
+wfst1 <- workflow_set(
+  preproc = list(no_prep = no_prep,
+                 smote_rec = smote_rec),
+  models  = list(knn = knn_tune)
+)
+
+```
+
+```{r}
+knn_cv <- wfst0 %>% 
+            workflow_map(fn = "fit_resamples",
+             verbose = TRUE,
+             seed = 2045,
+             resamples = folds,
+             metrics=metric_set(accuracy),
+            control=control_resamples(save_pred = TRUE)
+             )
+```
+
+```{r}
+collect_metrics(knn_cv)
+```
+
+```{r}
+confussion_matrix_cv <- knn_cv %>% 
+  workflowsets::extract_workflow_set_result(id = "no_prep_knn") %>% 
+  conf_mat_resampled(tidy = FALSE)
+```
+
+```{r}
+autoplot(confussion_matrix_cv,type = "heatmap")+
+  scale_fill_viridis_c(direction = -1,option = "inferno",alpha = 0.6)
+```
+
+```{r}
+autoplot(confussion_matrix_cv, type = "heatmap", normalize = "none") +
+  geom_text(aes(label = Freq)) +
+  scale_fill_viridis_c(direction = -1, option = "inferno", alpha = 0.6)
+
+```
+
+```{r}
+confussion_matrix_cv %>% 
+  summary()
+```
+
+```{r}
+knn_tune <- nearest_neighbor(neighbors=tune(),weight_func="rectangular",dist_power = 2) %>% 
+  set_engine("kknn") %>%
+  set_mode("classification")
+```
+
+```{r}
+knn_tune
+```
+
+```{r}
+knn_grid <- grid_regular(neighbors(range = c(2,50)),levels= 50)
+knn_grid 
+```
+
+```{r}
+fitted_knn <- function(x){
+  mod <- extract_fit_engine(x)
+  fitted(mod)
+}
+```
+
+```{r}
+wfst1 <- workflow_set(preproc = list(no_prep=no_prep),models = list(knn=knn_tune))
+```
+
+```{r}
+knn_tune_cv <- wfst1 %>% 
+            workflow_map(fn = "tune_grid",
+             verbose = TRUE,
+             seed = 2045,
+             resamples = folds,
+             grid = knn_grid,
+             metrics=metric_set(accuracy),
+            control=control_resamples(save_pred = TRUE)
+             )
+```
+
+```{r}
+best_neighbors <- knn_tune_cv %>%
+      extract_workflow_set_result("no_prep_knn") %>% 
+      select_best(metric="accuracy")
+```
+
+```{r}
+best_neighbors_1se <- knn_tune_cv %>%
+      extract_workflow_set_result("no_prep_knn") %>% 
+      select_by_one_std_err(metric="accuracy",desc(neighbors))
+```
+
+```{r}
+neighbors_result <- knn_tune_cv %>%
+                      extract_workflow_set_result("no_prep_knn") %>% 
+                      collect_metrics()
+neighbors_result
+```
+
+```{r}
+neighbors_result %>% 
+#  mutate(neighbors = factor(neighbors)) %>%
+  ggplot(aes(x=neighbors, y=mean)) +
+  geom_errorbar(aes(ymin=(mean-std_err),
+                      ymax=(mean+std_err)))+
+  geom_point()+
+  geom_vline(aes(xintercept = best_neighbors$neighbors,color="Highest"),
+            
+             linetype="dashed",linewidth=0.8)+
+  geom_vline(aes(xintercept = best_neighbors_1se$neighbors,
+                 color="1-SE-Rule"
+                 ),
+             linetype="dashed",linewidth=0.8)+
+  ylab("Accuracy") +
+  scale_x_continuous(n.breaks = 12)+
+  scale_color_manual(values = c("#03A9F4","#f44e03"),
+                     breaks = c("Highest","1-SE-Rule"),
+                     name = "Selection"
+                     )+
+  theme_bw()+
+  theme(legend.position = "top")
+```
+
+```{r}
+best_neighbors
+```
+
+```{r}
+best_neighbors_1se
+```
+
+```{r}
+knn_opt <- knn_tune %>% 
+  finalize_model(parameters = best_neighbors)
+knn_opt
+```
+
+```{r}
+knn_opt_fit <- knn_opt %>% 
+                fit(formula = Y~.,data=df)
+```
+
+## Prediksi Data Baru
+
+```{r}
+set.seed(1234)
+data_baru <- df %>% 
+              slice_sample(n = 2,by = Y) %>% 
+              select(-Y)
+data_baru
+```
+
+```{r}
+pred_data_baru <- knn_opt_fit %>% 
+                      predict(new_data = data_baru)
+pred_data_baru
+```
+
+# SMOTE
+
+```{r}
+df<-df %>% 
+select(-Provinsi)
+```
+
+```{r}
+set.seed(123)
+holdout_split <- initial_split(df,
+                               #sampel acak berdasarkan kelompok
+                               strata = Y,
+                               # proporsi untuk training data
+                               prop = 0.8)
+train_data <- training(holdout_split)
+test_data <- testing(holdout_split)
+```
+
+```{r}
+library(tidymodels)
+library(themis)
+library(workflowsets)
+
+set.seed(123)
+
+# Recipe 1: tanpa SMOTE
+no_prep <- recipe(Y ~ ., data = train_data)
+```
+
+```{r}
+# Recipe 2: dengan SMOTE + normalisasi
+smote_rec <- recipe(Y ~ ., data = train_data) %>%
+  step_smote(Y) %>%
+  step_normalize(all_numeric_predictors())
+```
+
+```{r}
+# Model: KNN dengan tuning neighbors
+knn_tune <- nearest_neighbor(
+  neighbors = tune(),
+  weight_func = "rectangular",
+  dist_power = 2
+) %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+# Grid neighbors
+knn_grid <- grid_regular(neighbors(range = c(2, 50)), levels = 50)
+```
+
+```{r}
+# Workflow set untuk 2 resep
+wfst <- workflow_set(
+  preproc = list(no_prep = no_prep,
+                 smote_rec = smote_rec),
+  models = list(knn = knn_tune)
+)
+```
+
+```{r}
+# 10-fold CV (stratified)
+set.seed(345)
+folds <- vfold_cv(train_data, v = 10, strata = Y)
+```
+
+```{r}
+# Tuning dengan resampling
+knn_tune_cv <- wfst %>%
+  workflow_map(
+    fn = "tune_grid",
+    verbose = TRUE,
+    seed = 2045,
+    resamples = folds,
+    grid = knn_grid,
+    metrics = metric_set(accuracy),
+    control = control_resamples(save_pred = TRUE)
+  )
+```
+
+```{r}
+knn_tune_cv
+```
+
+```{r}
+# Ambil hasil terbaik untuk masing-masing workflow
+best_neighbors <- knn_tune_cv %>%
+  extract_workflow_set_result("no_prep_knn") %>%
+  select_best(metric = "accuracy")
+best_neighbors
+```
+
+```{r}
+best_neighbors_1se <- knn_tune_cv %>%
+      extract_workflow_set_result("no_prep_knn") %>% 
+      select_by_one_std_err(metric="accuracy",desc(neighbors))
+best_neighbors_1se
+```
+
+```{r}
+best_neighbors_smote <- knn_tune_cv %>%
+  extract_workflow_set_result("smote_rec_knn") %>%
+  select_best(metric = "accuracy")
+best_neighbors_smote
+```
+
+```{r}
+best_neighbors_smote_1se <- knn_tune_cv %>%
+      extract_workflow_set_result("smote_rec_knn") %>% 
+      select_by_one_std_err(metric="accuracy",desc(neighbors))
+best_neighbors_smote_1se
+```
+
+```{r}
+# === Kumpulkan hasil tuning (metrics) untuk keduanya ===
+neighbors_result_no_prep <- knn_tune_cv %>%
+  extract_workflow_set_result("no_prep_knn") %>%
+  collect_metrics() %>%
+  mutate(workflow = "No SMOTE")
+
+neighbors_result_smote <- knn_tune_cv %>%
+  extract_workflow_set_result("smote_rec_knn") %>%
+  collect_metrics() %>%
+  mutate(workflow = "SMOTE")
+
+# Gabungkan hasil
+neighbors_result <- bind_rows(neighbors_result_no_prep,
+                              neighbors_result_smote)
+
+neighbors_result
+```
+
+```{r}
+neighbors_result %>%
+  filter(.metric == "accuracy") %>%
+  ggplot(aes(x = neighbors, y = mean, color = workflow)) +
+  
+  # error bar (± std_err)
+  geom_errorbar(aes(ymin = mean - std_err,
+                    ymax = mean + std_err),
+                width = 0.3, alpha = 0.6) +
+  
+  # titik mean accuracy
+  geom_point(size = 2) +
+  
+  # garis vertikal: best dan 1SE rule untuk No SMOTE
+  geom_vline(xintercept = best_neighbors$neighbors,
+             color = "#03A9F4", linetype = "dashed", linewidth = 0.8) +
+  geom_vline(xintercept = best_neighbors_1se$neighbors,
+             color = "#0288D1", linetype = "dotted", linewidth = 0.8) +
+  
+  # garis vertikal: best dan 1SE rule untuk SMOTE
+  geom_vline(xintercept = best_neighbors_smote$neighbors,
+             color = "#f44e03", linetype = "dashed", linewidth = 0.8) +
+  geom_vline(xintercept = best_neighbors_smote_1se$neighbors,
+             color = "#D84315", linetype = "dotted", linewidth = 0.8) +
+  
+  ylab("Accuracy") +
+  xlab("Neighbors (k)") +
+  scale_x_continuous(n.breaks = 12) +
+  scale_color_manual(values = c("No SMOTE" = "#03A9F4",
+                                "SMOTE" = "#f44e03"),
+                     name = "Workflow") +
+  theme_bw() +
+  theme(legend.position = "top")
+
+```
+
+\`
+
+```{r}
+# Bandingkan performa semua hasil
+knn_results <- knn_tune_cv %>%
+  rank_results() %>%
+  filter(.metric == "accuracy")
+
+autoplot(knn_tune_cv) +
+  theme_minimal()
+
+```
+
+```{r}
+# Finalize workflow untuk non-SMOTE
+wf_no_prep <- workflow() %>%
+  add_model(knn_tune %>% finalize_model(best_neighbors)) %>%
+  add_recipe(no_prep)
+```
+
+```{r}
+# Finalize workflow untuk SMOTE
+wf_smote <- workflow() %>%
+  add_model(knn_tune %>% finalize_model(best_neighbors_smote)) %>%
+  add_recipe(smote_rec)
+```
+
+```{r}
+# Fit model tanpa SMOTE
+fit_no_prep <- wf_no_prep %>%
+  fit(data = train_data)
+
+pred_no_prep <- predict(fit_no_prep, new_data = test_data) %>%
+  bind_cols(test_data %>% select(Y))
+
+conf_mat_no_prep <- conf_mat(pred_no_prep, truth = Y, estimate = .pred_class)
+
+autoplot(conf_mat_no_prep, type = "heatmap") +
+   scale_fill_gradient2(low = "blue", mid = "white", high = "orange", midpoint = 0.5)
+```
+
+```{r}
+# Fit model dengan SMOTE
+fit_smote <- wf_smote %>%
+  fit(data = train_data)
+
+pred_smote <- predict(fit_smote, new_data = test_data) %>%
+  bind_cols(test_data %>% select(Y))
+
+conf_mat_smote <- conf_mat(pred_smote, truth = Y, estimate = .pred_class)
+
+autoplot(conf_mat_smote, type = "heatmap") +
+ scale_fill_gradient2(low = "blue", mid = "white", high = "orange", midpoint = 0.5)
+
+```
+
+```{r}
+# pakai split awal yang sama
+final_no_prep <- last_fit(wf_no_prep, split = holdout_split)
+final_smote   <- last_fit(wf_smote, split = holdout_split)
+```
+
+```{r}
+# ambil prediksi & metrik
+metrics_no_prep <- final_no_prep %>%
+  collect_metrics()
+
+metrics_smote <- final_smote %>%
+  collect_metrics()
+
+conf_mat_no_prep <- final_no_prep %>%
+  collect_predictions() %>%
+  conf_mat(truth = Y, estimate = .pred_class)
+
+conf_mat_smote <- final_smote %>%
+  collect_predictions() %>%
+  conf_mat(truth = Y, estimate = .pred_class)
+
+```
+
+```{r}
+# === Evaluasi dengan no SMOTE ===
+metrics_no_prep <- final_no_prep %>%
+  collect_predictions() %>%
+  yardstick::metrics(truth = Y, estimate = .pred_class)
+
+class_metrics_no_prep <- final_no_prep %>%
+  collect_predictions() %>%
+  yardstick::metric_set(accuracy, precision, recall, f_meas,bal_accuracy)(truth = Y, estimate = .pred_class)
+```
+
+```{r}
+# === Evaluasi dengan SMOTE ===
+metrics_smote <- final_smote %>%
+  collect_predictions() %>%
+  yardstick::metrics(truth = Y, estimate = .pred_class)
+
+class_metrics_smote <- final_smote %>%
+  collect_predictions() %>%
+  yardstick::metric_set(accuracy, precision, recall, f_meas,bal_accuracy)(truth = Y, estimate = .pred_class)
+```
+
+```{r}
+# === Bandingkan hasil ===
+metrics_no_prep
+class_metrics_no_prep
+```
+
+```{r}
+metrics_smote
+class_metrics_smote
+
+```
