@@ -1,9 +1,93 @@
 ---
-title: "Tugas 2 Pemklas"
+title: "K-Nearest Neighbour"
 author: "Nabila Syukri"
-date: "`r Sys.Date()`"
-output: html_document
+date: "2025-10-22"
+output: 
+  rmdformats::readthedown:
+    toc_depth: 2      
+    number_sections: false
+    self_contained: true
+    highlight: kate
+    thumbnails: false
 ---
+
+# Pendahuluan
+
+## Latar Belakang: Memprediksi Akreditasi (A, B, C) dengan Skor Literasi dan Numerasi
+
+Peringkat Akreditasi (A, B, C) adalah *benchmark* fundamental untuk menilai mutu sebuah satuan pendidikan. Namun, apa yang mendorong perbedaan peringkat tersebut? Selain faktor infrastruktur dan administratif, faktor yang paling penting seharusnya adalah *output* pembelajaran siswa.
+
+Dalam analisis ini, kita akan mengeksplorasi sebuah pendekatan *machine learning* untuk menjawab pertanyaan:
+
+> **"Bisakah kita memprediksi Peringkat Akreditasi sebuah sekolah (A, B, C) hanya dengan melihat skor Literasi dan Numerasi?"**
+
+Kita akan menggunakan empat variabel prediktor kuantitatif yang sangat relevan:
+
+-   **Literasi 2023**
+
+-   **Numerasi 2023**
+
+-   **Literasi 2024**
+
+-   **Numerasi 2024**
+
+Karena variabel target kita (`Peringkat`) memiliki tiga kategori (A, B, dan C), ini menjadikannya masalah **Klasifikasi Multikelas**.
+
+## Metodologi: K-Nearest Neighbors (KNN)
+
+Untuk memecahkan masalah ini, kita akan menggunakan algoritma **K-Nearest Neighbors (KNN)**.
+
+**Apa itu KNN?**
+
+KNN adalah algoritma *machine learning* yang sederhana namun sangat intuitif. Prinsip dasarnya bekerja seperti pepatah: **"Anda dinilai dari dengan siapa Anda bergaul."**
+
+KNN tidak "belajar" sebuah formula rumit. Sebaliknya, ia menghafal seluruh data latih. Ketika kita ingin memprediksi peringkat sekolah baru, KNN melakukan tiga langkah:
+
+1.  **Mengukur Jarak:** Ia menghitung "jarak" atau "kemiripan" sekolah baru tersebut dengan *semua* sekolah lain dalam data latih.
+
+2.  **Mencari Tetangga (K):** Ia menemukan 'K' sekolah terdekat (tetangga terdekat) berdasarkan skornya. 'K' adalah angka yang kita tentukan (misalnya, 5, 7, atau 10).
+
+3.  **Mengambil Suara (Voting):** Ia melihat peringkat akreditasi dari 'K' tetangga tersebut dan mengambil suara terbanyak (majority vote) untuk menentukan prediksi.
+
+**Bagaimana KNN Bekerja untuk Multikelas (A, B, C)?**
+
+Inilah keindahan KNN: logikanya tidak berubah sama sekali untuk multikelas.
+
+-   **Contoh:** Kita ingin memprediksi Sekolah X dan kita menetapkan **K = 7**.
+
+-   KNN mencari 7 tetangga terdekat berdasarkan skor literasi dan numerasinya.
+
+-   Hasil "voting" dari 7 tetangga tersebut adalah:
+
+    -   Peringkat **'A'**: 3 suara
+
+    -   Peringkat **'B'**: 2 suara
+
+    -   Peringkat **'C'**: 2 suara
+
+-   **Keputusan:** Suara terbanyak adalah **'A'** (3 suara). Maka, KNN memprediksi Sekolah X akan mendapatkan Peringkat 'A'.
+
+## Studi Kasus : Provinsi DKI Jakarta, DIY, Bali, Banten
+
+Kami memfokuskan studi kasus pada empat provinsi yang sering dianggap sebagai pusat keunggulan di Indonesia: **DKI Jakarta, Daerah Istimewa Yogyakarta (DIY), Bali, dan Banten.**
+
+## Tujuan RPubs
+
+1.  **Eksplorasi Data (EDA):** Memvisualisasikan distribusi skor dan melihat korelasi antar variabel prediktor.
+
+2.  **Pembagian Data:** Membagi data menjadi 80% *train* dan 20% *test*.
+
+3.  **Optimasi Model (Tuning):** Menjalankan *cross-validation* untuk menemukan nilai 'K' optimal.
+
+4.  **Pelatihan Model:** Melatih model KNN final pada data latih menggunakan 'K' optimal tersebut.
+
+5.  **Penanganan Imbalance Class** : Menyeimbangkan kelas peringkat akreditasi A B dan C dengan SMOTE
+
+6.  **Evaluasi Model:** Membuat **Confusion Matrix multikelas** pada data uji untuk menilai Akurasi, Presisi, dan Recall untuk setiap kelas (A, B, dan C).
+
+# Hasil dan Pembahasan
+
+## 1. Persiapan Data
 
 ```{r}
 library(readxl)
@@ -16,10 +100,8 @@ library(DataExplorer)
 library(kknn)
 ```
 
-# Import Data
-
 ```{r}
-df <- read_excel("C:/Users/nabil/Downloads/Pemodelan Klasifikasi/Data Tugas-2.xlsx")
+df <- read_excel("Data Tugas-2.xlsx")
 str(df)
 ```
 
@@ -46,7 +128,7 @@ prov_count <- df %>%
   count(Provinsi)
 ```
 
-# Eksplorasi Data
+## 2. Eksplorasi Data
 
 ```{r}
 summary(df[, c("Lit_2023","Num_2023","Lit_2024","Num_2024")])
@@ -58,24 +140,50 @@ df <- df %>%
       mutate(across(where(is.character),as.factor))
 ```
 
-Cek Missing Value
+### 2.1. Cek Missing Value
 
 ```{r}
 plot_intro(df,theme_config = theme_classic())
 ```
 
+### 2.2 Jumlah Sekolah Per Provinsi
+
+```{r}
+# pie chart dengan label jumlah
+ggplot(prov_count, aes(x = "", y = n, fill = Provinsi)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = n),
+            position = position_stack(vjust = 0.5),
+            color = "black",
+            size = 4) +
+   scale_fill_brewer(palette = "Oranges") +
+  labs(title = "Jumlah Sekolah per Provinsi",
+       fill = "Provinsi") +
+  theme_void()
+```
+
 Ubah Kolom "Peringkat Akreditasi" jadi Y biar lebih gampang
 
 ```{r}
+
 df <- df %>%
   rename(Y = `Peringkat Akreditasi`)
 ```
 
-Barplot Frekuensi Peringkat Akreditasi
+### 2.3. Barplot Frekuensi Peringkat Akreditasi
 
 ```{r}
-ggplot(df, aes(x = Y, fill = Y)) +
-  geom_bar() +
+# Hitung frekuensi + proporsi
+freq_tab <- df %>%
+  count(Y) %>%
+  mutate(prop = n / sum(n) * 100)
+
+# Plot
+ggplot(freq_tab, aes(x = Y, y = n, fill = Y)) +
+  geom_col() +
+  geom_text(aes(label = paste0(n, " (", round(prop,1), "%)")),
+            vjust = -0.5, size = 4) +
   labs(title = "Frekuensi Peringkat Akreditasi",
        x = "Peringkat Akreditasi",
        y = "Frekuensi") +
@@ -83,7 +191,7 @@ ggplot(df, aes(x = Y, fill = Y)) +
   theme_classic()
 ```
 
-hapus observasi pada kelas "Tidak Terakreditasi" karena terlalu sedikit
+hapus observasi pada kelas "Tidak Terakreditasi" karena terlalu sedikit yang akan menyebabkan model kurang mampu menggeneralisir
 
 ```{r}
 TTA <- df %>%
@@ -116,16 +224,28 @@ ggplot(freq_tab, aes(x = Y, y = n, fill = Y)) +
   theme_classic()
 ```
 
-Boxplot sebaran nilai peubah terhadap kelas Y
+Berdasarkan plot sebaran Variabel Respon (Y) dalam hal ini peringkat akreditasi mengalami kelas yang tidak seimbang
+
+### 2.4 Boxplot sebaran nilai peubah terhadap kelas Y
 
 ```{r}
-plot_boxplot(data = df,
-             by = "Y",
-             geom_boxplot_args = list(fill="#03A9F4"),
-             ggtheme = theme_classic())
+df_long <- df %>%
+  pivot_longer(cols = c(Lit_2023, Num_2023, Lit_2024, Num_2024),
+               names_to = "Variabel",
+               values_to = "Skor")
+
+ggplot(df_long, aes(x = Y, y = Skor, fill = Y)) +
+  geom_boxplot() +
+  facet_wrap(~ Variabel, scales = "free_y") +
+   scale_fill_brewer(palette = "Oranges") +
+  labs(title = "Distribusi Nilai Literasi & Numerasi per Akreditasi",
+       x = "Akreditasi", y = "Skor") +
+  theme_minimal()
 ```
 
-Frekuensi Peringkat Akreditasi per Provinsi
+nilai masing-masing peubah terlihat berbeda rentang nilainya yaitu A lebih tinggi dari B C, tapi A banyak outlier
+
+### 2.4. Frekuensi Peringkat Akreditasi per Provinsi
 
 ```{r}
 df %>%
@@ -145,6 +265,8 @@ df %>%
 
 ```
 
+### 2.5 Korelasi
+
 ```{r}
 library(corrplot)
 cor_mat <- df %>%
@@ -157,16 +279,45 @@ corrplot(cor_mat, method = "color", type = "upper",
 
 ```
 
-# KNN
+```{r}
+library(GGally)
+library(ggplot2)
 
-untuk analisis klasifikasi kolom Provinsi tidak digunakan sebagai variabel prediktor
+df %>%
+  select(Lit_2023, Num_2023, Lit_2024, Num_2024) %>%
+  ggpairs(
+    aes(alpha = 0.6),
+    upper = list(continuous = wrap("cor", size = 4, stars = FALSE)),  # hanya angka korelasi
+    lower = list(continuous = wrap("smooth", 
+                                   color = "black", alpha = 0.6, se = FALSE)), 
+    diag  = list(continuous = wrap("densityDiag", 
+                                   fill = "orange", alpha = 0.6))
+  ) +
+  theme_classic() 
+```
+
+## 3. Model KNN
+
+Untuk analisis klasifikasi ini, kita akan fokus murni pada skor rapor pendidikan. Oleh karena itu, kolom `Provinsi` tidak akan digunakan sebagai variabel prediktor dan kita keluarkan dari data.
 
 ```{r}
 df<-df %>% 
 select(-Provinsi)
 ```
 
-## Split data
+Tantangan utama dalam dataset ini adalah **data yang tidak seimbang (imbalanced)**. Kemungkinan besar, jumlah sekolah dengan akreditasi 'A' atau 'B' jauh lebih banyak daripada 'C'. Jika kita melatih model pada data ini, model akan cenderung "malas" dan lebih sering menebak kelas mayoritas, sehingga kinerjanya buruk pada kelas minoritas ('C').
+
+Untuk mengatasi ini, kita akan merancang sebuah eksperimen untuk membandingkan dua pendekatan:
+
+1.  **Workflow 1 (`no_prep`):** Melatih KNN pada data mentah (asli).
+
+2.  **Workflow 2 (`smote_rec`):** Melatih KNN pada data yang telah kita seimbangkan menggunakan **SMOTE** dan kita **normalisasi**.
+
+KNN *wajib* menggunakan normalisasi/standardisasi karena ia berbasis jarak. `step_smote` akan membuat data sintetis (buatan) untuk kelas minoritas agar jumlahnya seimbang.
+
+### 3.1 Pembagian data
+
+Pertama, kita bagi data kita menjadi data latih (80%) dan data uji (20%). Kita gunakan `strata = Y` agar proporsi kelas A, B, dan C tetap sama di kedua set data.
 
 ```{r}
 set.seed(123)
@@ -205,393 +356,70 @@ p_train + p_test
 
 ```
 
-Pembagian data berdasarkan strata Y, jadi train dan test proporsinya sama setiap kelas
+Plot di atas untuk memperlihatkan bahwa pembagian data training dan testing sesuai dengan strata Y sehingga proporsi kelas sama untuk train dan test set
 
-karena tadi kelasnya imbalance coba kita pakai SMOTE
-
-```{r}
-
-library(themis) # untuk SMOTE
-
-set.seed(123)
-
-# Bagi data train/test
-holdout_split <- initial_split(df, prop = 0.8, strata = Y)
-train_data <- training(holdout_split)
-test_data  <- testing(holdout_split)
-
-# Recipe dengan SMOTE (hanya diterapkan di train)
-smote_recipe <- recipe(Y ~ ., data = train_data) %>%
-  step_smote(Y) #lakukan SMOTE
- 
-
-# Periksa hasil prep
-smote_prep <- prep(smote_recipe)
-train_smote <- juice(smote_prep) # train yang sudah di-SMOTE
-test_clean  <- bake(smote_prep, new_data = test_data) # test tetap original
-
-# Cek distribusi kelas
-table(train_data$Y)
-table(train_smote$Y)
-table(test_clean$Y)  # tidak berubah
-
-```
-
-lihat distribusi data sintetis hasil SMOTE
-
-```{r}
-
-# Gabungkan train asli dan train hasil SMOTE
-plot_data <- bind_rows(
-  train_data %>% mutate(type = "Asli"),
-  train_smote %>% mutate(type = "SMOTE")
-)
-
-# Scatter plot
-ggplot(plot_data, aes(x = Lit_2023, y = Num_2023, color = Y, shape = type)) +
-  geom_point(alpha = 0.6) +
-  labs(title = "Visualisasi Data Asli vs Hasil SMOTE",
-       x = "Literasi 2023", y = "Numerasi 2023") +
-  theme_minimal()
-
-```
-
-```{r}
-tidy(holdout_split) %>% 
-  count(Data) %>% 
-  mutate(percent=n*100/sum(n))
-```
-
-```{r}
-
-df %>% 
-  mutate(Row=seq(nrow(df))) %>% 
-  select(Y,Row) %>% 
-  left_join(y = tidy(holdout_split),by = "Row") %>% 
-  count(Y,Data) %>% 
-  group_by(Y) %>% 
-  mutate(percent=n*100/sum(n),n=NULL) %>% 
-  pivot_wider(id_cols = Y,names_from = Data,values_from = percent)
-```
-
-```{r}
-set.seed(345)
-folds <- vfold_cv(df, v = 10,strata = "Y" )
-```
-
-```{r}
-tidy(folds) %>% 
-  filter(Row<700) %>% 
-ggplot(aes(x = Fold, y = Row,fill = Data)) +
-    geom_tile()+
-  scale_fill_brewer(palette = "Oranges") +
-  theme_classic()
-```
-
-```{r}
-df %>% 
-  mutate(Row=seq(nrow(df))) %>% 
-  select(Y,Row) %>% 
-  left_join(tidy(folds),by="Row")%>% 
-  count(Y,Fold,Data) %>% 
-  group_by(Y,Fold) %>% 
-  mutate(percent=n*100/sum(n)) %>% 
-  arrange(Fold,Data)
-```
-
-```{r}
-knn <- nearest_neighbor(neighbors=7,weight_func="rectangular",dist_power = 2) %>% 
-  set_engine("kknn") %>%
-  set_mode("classification")
-knn
-```
-
-```{r}
-knn %>% translate()
-```
-
-```{r}
-knn_hold <- knn %>% 
-  fit(Y~.,data=train_smote)
-```
-
-```{r}
-extract_fit_engine(knn_hold)
-```
-
-```{r}
-pred_knn <- knn_hold %>% 
-              predict(new_data = test_data) %>% 
-              bind_cols(test_data %>% select(Y))
-              
-pred_knn %>% 
-  slice_head(n=10)
-```
-
-```{r}
-confussion_matrix <- pred_knn %>%
-                      conf_mat(truth=Y,estimate=.pred_class)
-autoplot(confussion_matrix,type = "heatmap")+
-  scale_fill_viridis_c(direction = -1,option = "inferno",alpha = 0.6)
-```
-
-```{r}
-pred_knn %>%
-  conf_mat(truth=Y,estimate=.pred_class) %>% 
-  summary()
-```
-
-```{r}
-pred_knn %>% 
-  accuracy(truth=Y,estimate=.pred_class)
-```
-
-## K-Fold Cross Validation
-
-```{r}
-no_prep <- recipe(Y~.,data=df)
-```
-
-```{r}
-smote_rec <- recipe(Y ~ ., data = df) %>%
-  step_smote(Y)
-
-```
-
-```{r}
-wfst0 <- workflow_set(preproc = list(no_prep=no_prep),models = list(knn=knn))
-```
-
-```{r}
-wfst1 <- workflow_set(
-  preproc = list(no_prep = no_prep,
-                 smote_rec = smote_rec),
-  models  = list(knn = knn_tune)
-)
-
-```
-
-```{r}
-knn_cv <- wfst0 %>% 
-            workflow_map(fn = "fit_resamples",
-             verbose = TRUE,
-             seed = 2045,
-             resamples = folds,
-             metrics=metric_set(accuracy),
-            control=control_resamples(save_pred = TRUE)
-             )
-```
-
-```{r}
-collect_metrics(knn_cv)
-```
-
-```{r}
-confussion_matrix_cv <- knn_cv %>% 
-  workflowsets::extract_workflow_set_result(id = "no_prep_knn") %>% 
-  conf_mat_resampled(tidy = FALSE)
-```
-
-```{r}
-autoplot(confussion_matrix_cv,type = "heatmap")+
-  scale_fill_viridis_c(direction = -1,option = "inferno",alpha = 0.6)
-```
-
-```{r}
-autoplot(confussion_matrix_cv, type = "heatmap", normalize = "none") +
-  geom_text(aes(label = Freq)) +
-  scale_fill_viridis_c(direction = -1, option = "inferno", alpha = 0.6)
-
-```
-
-```{r}
-confussion_matrix_cv %>% 
-  summary()
-```
-
-```{r}
-knn_tune <- nearest_neighbor(neighbors=tune(),weight_func="rectangular",dist_power = 2) %>% 
-  set_engine("kknn") %>%
-  set_mode("classification")
-```
-
-```{r}
-knn_tune
-```
-
-```{r}
-knn_grid <- grid_regular(neighbors(range = c(2,50)),levels= 50)
-knn_grid 
-```
-
-```{r}
-fitted_knn <- function(x){
-  mod <- extract_fit_engine(x)
-  fitted(mod)
-}
-```
-
-```{r}
-wfst1 <- workflow_set(preproc = list(no_prep=no_prep),models = list(knn=knn_tune))
-```
-
-```{r}
-knn_tune_cv <- wfst1 %>% 
-            workflow_map(fn = "tune_grid",
-             verbose = TRUE,
-             seed = 2045,
-             resamples = folds,
-             grid = knn_grid,
-             metrics=metric_set(accuracy),
-            control=control_resamples(save_pred = TRUE)
-             )
-```
-
-```{r}
-best_neighbors <- knn_tune_cv %>%
-      extract_workflow_set_result("no_prep_knn") %>% 
-      select_best(metric="accuracy")
-```
-
-```{r}
-best_neighbors_1se <- knn_tune_cv %>%
-      extract_workflow_set_result("no_prep_knn") %>% 
-      select_by_one_std_err(metric="accuracy",desc(neighbors))
-```
-
-```{r}
-neighbors_result <- knn_tune_cv %>%
-                      extract_workflow_set_result("no_prep_knn") %>% 
-                      collect_metrics()
-neighbors_result
-```
-
-```{r}
-neighbors_result %>% 
-#  mutate(neighbors = factor(neighbors)) %>%
-  ggplot(aes(x=neighbors, y=mean)) +
-  geom_errorbar(aes(ymin=(mean-std_err),
-                      ymax=(mean+std_err)))+
-  geom_point()+
-  geom_vline(aes(xintercept = best_neighbors$neighbors,color="Highest"),
-            
-             linetype="dashed",linewidth=0.8)+
-  geom_vline(aes(xintercept = best_neighbors_1se$neighbors,
-                 color="1-SE-Rule"
-                 ),
-             linetype="dashed",linewidth=0.8)+
-  ylab("Accuracy") +
-  scale_x_continuous(n.breaks = 12)+
-  scale_color_manual(values = c("#03A9F4","#f44e03"),
-                     breaks = c("Highest","1-SE-Rule"),
-                     name = "Selection"
-                     )+
-  theme_bw()+
-  theme(legend.position = "top")
-```
-
-```{r}
-best_neighbors
-```
-
-```{r}
-best_neighbors_1se
-```
-
-```{r}
-knn_opt <- knn_tune %>% 
-  finalize_model(parameters = best_neighbors)
-knn_opt
-```
-
-```{r}
-knn_opt_fit <- knn_opt %>% 
-                fit(formula = Y~.,data=df)
-```
-
-## Prediksi Data Baru
-
-```{r}
-set.seed(1234)
-data_baru <- df %>% 
-              slice_sample(n = 2,by = Y) %>% 
-              select(-Y)
-data_baru
-```
-
-```{r}
-pred_data_baru <- knn_opt_fit %>% 
-                      predict(new_data = data_baru)
-pred_data_baru
-```
-
-# SMOTE
-
-```{r}
-df<-df %>% 
-select(-Provinsi)
-```
-
-```{r}
-set.seed(123)
-holdout_split <- initial_split(df,
-                               #sampel acak berdasarkan kelompok
-                               strata = Y,
-                               # proporsi untuk training data
-                               prop = 0.8)
-train_data <- training(holdout_split)
-test_data <- testing(holdout_split)
-```
+Selanjutnya, kita siapkan "resep" untuk kedua workflow kita.
 
 ```{r}
 library(tidymodels)
-library(themis)
-library(workflowsets)
+library(themis)      # Untuk step_smote
+library(workflowsets) # Untuk membandingkan workflow
 
 set.seed(123)
 
-# Recipe 1: tanpa SMOTE
+# Recipe 1: Tanpa preprocessing
 no_prep <- recipe(Y ~ ., data = train_data)
-```
 
-```{r}
-# Recipe 2: dengan SMOTE + normalisasi
+# Recipe 2: SMOTE + Normalisasi
+# Kita terapkan SMOTE untuk menyeimbangkan kelas
+# Kita terapkan Normalisasi (centering dan scaling) karena KNN sensitif terhadap skala
 smote_rec <- recipe(Y ~ ., data = train_data) %>%
   step_smote(Y) %>%
   step_normalize(all_numeric_predictors())
 ```
 
+### 3.2. Penentuan Model dan Tuning Grid
+
+Kita akan menggunakan model KNN. Parameter terpenting dalam KNN adalah `neighbors` (jumlah tetangga, 'k'). Kita tidak tahu nilai 'k' terbaik, jadi kita akan memberitahu `tidymodels` untuk **mencarinya (tuning)**.
+
+Kita akan menguji 50 nilai 'k' yang berbeda, dari k=2 sampai k=50.
+
 ```{r}
-# Model: KNN dengan tuning neighbors
+# Model: KNN dengan K yang bisa di-tuning
 knn_tune <- nearest_neighbor(
-  neighbors = tune(),
+  neighbors = tune(), # 'tune()' berarti parameter ini akan kita cari
   weight_func = "rectangular",
-  dist_power = 2
+  dist_power = 2 # Jarak Euclidean
 ) %>%
   set_engine("kknn") %>%
   set_mode("classification")
 
-# Grid neighbors
+# Grid (daftar) nilai 'k' yang akan diuji
 knn_grid <- grid_regular(neighbors(range = c(2, 50)), levels = 50)
 ```
 
+### 3.3. Validasi Silang (Cross-Validation)
+
+![](images/clipboard-3278831340.png)
+
+Untuk menemukan 'k' terbaik, kita tidak bisa menggunakan `test_data` (karena itu curang). Kita akan menggunakan **10-Fold Cross-Validation** pada `train_data`. Data latih akan dibagi 10, lalu model akan dilatih 10 kali.
+
+Kita gunakan `workflow_set` untuk menggabungkan kedua resep (`no_prep` dan `smote_rec`) dengan model (`knn_tune`).
+
 ```{r}
-# Workflow set untuk 2 resep
+# 1. Buat workflow set
 wfst <- workflow_set(
   preproc = list(no_prep = no_prep,
                  smote_rec = smote_rec),
   models = list(knn = knn_tune)
 )
-```
 
-```{r}
-# 10-fold CV (stratified)
+# 2. Siapkan 10-fold CV (stratified)
 set.seed(345)
 folds <- vfold_cv(train_data, v = 10, strata = Y)
-```
 
-```{r}
-# Tuning dengan resampling
+# 3. Jalankan tuning!
+# Ini akan menguji 2 workflow x 50 nilai K x 10 folds
 knn_tune_cv <- wfst %>%
   workflow_map(
     fn = "tune_grid",
@@ -604,41 +432,16 @@ knn_tune_cv <- wfst %>%
   )
 ```
 
-```{r}
-knn_tune_cv
-```
+### 3.4. Hasil Tuning: SMOTE vs Data Asli
+
+Sekarang kita plot hasil eksperimen CV kita. Kita ingin tahu:
+
+1.  Workflow mana yang lebih baik (biru vs oranye)?
+
+2.  Berapa nilai 'k' terbaik untuk masing-masing workflow?
 
 ```{r}
-# Ambil hasil terbaik untuk masing-masing workflow
-best_neighbors <- knn_tune_cv %>%
-  extract_workflow_set_result("no_prep_knn") %>%
-  select_best(metric = "accuracy")
-best_neighbors
-```
-
-```{r}
-best_neighbors_1se <- knn_tune_cv %>%
-      extract_workflow_set_result("no_prep_knn") %>% 
-      select_by_one_std_err(metric="accuracy",desc(neighbors))
-best_neighbors_1se
-```
-
-```{r}
-best_neighbors_smote <- knn_tune_cv %>%
-  extract_workflow_set_result("smote_rec_knn") %>%
-  select_best(metric = "accuracy")
-best_neighbors_smote
-```
-
-```{r}
-best_neighbors_smote_1se <- knn_tune_cv %>%
-      extract_workflow_set_result("smote_rec_knn") %>% 
-      select_by_one_std_err(metric="accuracy",desc(neighbors))
-best_neighbors_smote_1se
-```
-
-```{r}
-# === Kumpulkan hasil tuning (metrics) untuk keduanya ===
+# Kumpulkan hasil tuning (metrics) untuk keduanya
 neighbors_result_no_prep <- knn_tune_cv %>%
   extract_workflow_set_result("no_prep_knn") %>%
   collect_metrics() %>%
@@ -653,155 +456,223 @@ neighbors_result_smote <- knn_tune_cv %>%
 neighbors_result <- bind_rows(neighbors_result_no_prep,
                               neighbors_result_smote)
 
-neighbors_result
-```
-
-```{r}
+# Plot perbandingan
 neighbors_result %>%
   filter(.metric == "accuracy") %>%
   ggplot(aes(x = neighbors, y = mean, color = workflow)) +
-  
-  # error bar (± std_err)
   geom_errorbar(aes(ymin = mean - std_err,
                     ymax = mean + std_err),
                 width = 0.3, alpha = 0.6) +
-  
-  # titik mean accuracy
   geom_point(size = 2) +
-  
-  # garis vertikal: best dan 1SE rule untuk No SMOTE
-  geom_vline(xintercept = best_neighbors$neighbors,
-             color = "#03A9F4", linetype = "dashed", linewidth = 0.8) +
-  geom_vline(xintercept = best_neighbors_1se$neighbors,
-             color = "#0288D1", linetype = "dotted", linewidth = 0.8) +
-  
-  # garis vertikal: best dan 1SE rule untuk SMOTE
-  geom_vline(xintercept = best_neighbors_smote$neighbors,
-             color = "#f44e03", linetype = "dashed", linewidth = 0.8) +
-  geom_vline(xintercept = best_neighbors_smote_1se$neighbors,
-             color = "#D84315", linetype = "dotted", linewidth = 0.8) +
-  
-  ylab("Accuracy") +
+  geom_line(alpha = 0.7) +
+  ylab("Accuracy (Rata-rata CV)") +
   xlab("Neighbors (k)") +
-  scale_x_continuous(n.breaks = 12) +
   scale_color_manual(values = c("No SMOTE" = "#03A9F4",
                                 "SMOTE" = "#f44e03"),
                      name = "Workflow") +
+  labs(title = "Perbandingan Kinerja Akurasi KNN",
+       subtitle = "Data Asli vs. SMOTE + Normalisasi") +
   theme_bw() +
   theme(legend.position = "top")
+```
+
+**Interpretasi Plot:** Dari plot di atas, kita dapat melihat bahwa workflow `SMOTE` (garis oranye) secara konsisten memberikan akurasi yang lebih tinggi daripada workflow `No SMOTE` (garis biru).
+
+Sekarang kita pilih nilai 'k' terbaik untuk masing-masing:
+
+```{r}
+# 'k' terbaik untuk No SMOTE
+best_neighbors <- knn_tune_cv %>%
+  extract_workflow_set_result("no_prep_knn") %>%
+  select_best(metric = "accuracy")
+best_neighbors
 
 ```
 
-\`
-
 ```{r}
-# Bandingkan performa semua hasil
-knn_results <- knn_tune_cv %>%
-  rank_results() %>%
-  filter(.metric == "accuracy")
-
-autoplot(knn_tune_cv) +
-  theme_minimal()
-
+# 'k' terbaik untuk SMOTE
+best_neighbors_smote <- knn_tune_cv %>%
+  extract_workflow_set_result("smote_rec_knn") %>%
+  select_best(metric = "accuracy")
+best_neighbors_smote
 ```
 
+Berdasarkan hasil tuning CV
+
+-   No SMOTE = k terbaik berdasarkan accuracy 33
+
+-   SMOTE = k terbaik berdasarkan accuracy 50
+
+### 3.5. Evaluasi Akhir pada Data Uji
+
+Kita telah menemukan nilai 'k' optimal untuk *kedua* workflow (data asli dan SMOTE) menggunakan *cross-validation* pada data latih.
+
+Kini saatnya menguji kedua model final tersebut pada `test_data`—data yang belum pernah tersentuh sama sekali. Fungsi `last_fit()` sangat ideal untuk ini: ia akan melatih model final pada *seluruh* `train_data` dan mengevaluasinya *satu kali* pada `test_data`.
+
+#### 3.5.1. Finalisasi Kedua Workflow
+
+Pertama, kita siapkan dua workflow final menggunakan nilai 'k' terbaik yang sudah kita temukan untuk masing-masing.
+
 ```{r}
-# Finalize workflow untuk non-SMOTE
+# 1. Finalize workflow untuk non-SMOTE (menggunakan 'k' terbaiknya)
 wf_no_prep <- workflow() %>%
   add_model(knn_tune %>% finalize_model(best_neighbors)) %>%
   add_recipe(no_prep)
-```
 
-```{r}
-# Finalize workflow untuk SMOTE
+# 2. Finalize workflow untuk SMOTE (menggunakan 'k' terbaiknya)
 wf_smote <- workflow() %>%
   add_model(knn_tune %>% finalize_model(best_neighbors_smote)) %>%
   add_recipe(smote_rec)
-```
-
-```{r}
-# Fit model tanpa SMOTE
-fit_no_prep <- wf_no_prep %>%
-  fit(data = train_data)
-
-pred_no_prep <- predict(fit_no_prep, new_data = test_data) %>%
-  bind_cols(test_data %>% select(Y))
-
-conf_mat_no_prep <- conf_mat(pred_no_prep, truth = Y, estimate = .pred_class)
-
-autoplot(conf_mat_no_prep, type = "heatmap") +
-   scale_fill_gradient2(low = "blue", mid = "white", high = "orange", midpoint = 0.5)
-```
-
-```{r}
-# Fit model dengan SMOTE
-fit_smote <- wf_smote %>%
-  fit(data = train_data)
-
-pred_smote <- predict(fit_smote, new_data = test_data) %>%
-  bind_cols(test_data %>% select(Y))
-
-conf_mat_smote <- conf_mat(pred_smote, truth = Y, estimate = .pred_class)
-
-autoplot(conf_mat_smote, type = "heatmap") +
- scale_fill_gradient2(low = "blue", mid = "white", high = "orange", midpoint = 0.5)
 
 ```
 
+#### 3.5.2. Menjalankan `last_fit()`
+
+Sekarang kita jalankan `last_fit()` pada kedua workflow menggunakan `holdout_split` yang sama.
+
+Fungsi `last_fit()` dirancang khusus untuk langkah "final" ini.
+
+1.  Ia mengambil workflow final (misal: `wf_no_prep` dan `wf_smote`).
+
+2.  Ia melatihnya (`fit`) *satu kali* pada data latih dari `holdout_split` (yaitu `train_data`).
+
+3.  Ia mengevaluasinya (`evaluate`) *satu kali* pada data uji dari `holdout_split` (yaitu `test_data`).
+
 ```{r}
-# pakai split awal yang sama
+# Menjalankan 'last_fit' untuk workflow No SMOTE
+set.seed(1234)
 final_no_prep <- last_fit(wf_no_prep, split = holdout_split)
+
+# Menjalankan 'last_fit' untuk workflow SMOTE
+set.seed(1234)
 final_smote   <- last_fit(wf_smote, split = holdout_split)
+
+```
+
+### 3.6. Hasil Kinerja Model: SMOTE vs Data Asli
+
+Kita sekarang memiliki dua hasil akhir. Mari kita kumpulkan metrik dan *confusion matrix* dari keduanya untuk perbandingan *head-to-head*.
+
+#### 3.6.1. Perbandingan Metrik Performa
+
+Metrik ini memberi tahu kita kinerja keseluruhan model di data uji.
+
+```{r}
+# Ambil metrik (Accuracy & ROC AUC) untuk No SMOTE
+metrics_no_prep <- final_no_prep %>%
+  collect_metrics() %>% 
+  mutate(workflow = "No SMOTE")
+
+# Ambil metrik (Accuracy & ROC AUC) untuk SMOTE
+metrics_smote <- final_smote %>%
+  collect_metrics() %>% 
+  mutate(workflow = "SMOTE")
+
+# Gabungkan dan tampilkan
+bind_rows(metrics_no_prep, metrics_smote)
+```
+
+**Analisis Awal:** Dari tabel ringkasan di atas, kita bisa melihat perbandingan langsung **Accuracy** dan **ROC AUC** (rata-rata) pada data uji. Workflow SMOTE menunjukkan performa lebih baik secara keseluruhan.
+
+#### 3.6.2. Perbandingan Metrik per Kelas (Lebih Detail)
+
+Akurasi saja tidak cukup untuk data *imbalanced*. Kita perlu melihat metrik per kelas, terutama **Balanced Accuracy**, **Precision**, dan **Recall**.
+
+```{r}
+# === Metrik Detail untuk No SMOTE ===
+class_metrics_no_prep <- final_no_prep %>%
+  collect_predictions() %>%
+  yardstick::metric_set(accuracy, bal_accuracy, precision, recall, f_meas)(truth = Y, estimate = .pred_class) %>% 
+  mutate(workflow = "No SMOTE")
+
+print("--- Hasil Model: No SMOTE (Data Asli) ---")
+class_metrics_no_prep
+
 ```
 
 ```{r}
-# ambil prediksi & metrik
-metrics_no_prep <- final_no_prep %>%
-  collect_metrics()
+# === Metrik Detail untuk SMOTE ===
+class_metrics_smote <- final_smote %>%
+  collect_predictions() %>%
+  yardstick::metric_set(accuracy, bal_accuracy, precision, recall, f_meas)(truth = Y, estimate = .pred_class) %>% 
+  mutate(workflow = "SMOTE")
 
-metrics_smote <- final_smote %>%
-  collect_metrics()
+print("--- Hasil Model: SMOTE + Normalisasi ---")
+class_metrics_smote
+```
 
+**Analisis Mendalam:**
+
+-   **Balanced Accuracy:** Ini adalah metrik yang paling adil. Model SMOTE memiliki 0.787 lebih tinggi dari No SMOTE yaitu 0.624 , menunjukkan SMOTE memiliki kemampuannya yang lebih dalam menangani kelas minoritas.
+
+-   **Recall (Kelas C):** Lihat `recall` untuk kelas 'C' (jika itu minoritas). Model `No SMOTE` mencapai 0.454, sementara `SMOTE` mencapai 0.725. Ini membuktikan bahwa SMOTE berhasil meningkatkan kemampuan model untuk "menemukan" kelas minoritas.
+
+#### 3.6.3. Perbandingan Confusion Matrix
+
+Visualisasi adalah cara terbaik untuk melihat di mana letak kesalahan model.
+
+```{r}
+# === Confusion Matrix: No SMOTE ===
 conf_mat_no_prep <- final_no_prep %>%
   collect_predictions() %>%
   conf_mat(truth = Y, estimate = .pred_class)
 
+autoplot(conf_mat_no_prep, type = "heatmap") +
+  labs(title = "Confusion Matrix: Model KNN (Data Asli)") +
+  scale_fill_gradient2(low = "#E3F2FD", mid = "#64B5F6", high = "#1565C0")
+
+```
+
+```{r}
+# === Confusion Matrix: SMOTE ===
 conf_mat_smote <- final_smote %>%
   collect_predictions() %>%
   conf_mat(truth = Y, estimate = .pred_class)
 
+autoplot(conf_mat_smote, type = "heatmap") +
+  labs(title = "Confusion Matrix: Model KNN (SMOTE + Normalisasi)") +
+  scale_fill_gradient2(low = "#FFF3E0", mid = "#FFB74D", high = "#EF6C00")
+
 ```
 
+### 3.7. Kesimpulan Model KNN
+
 ```{r}
-# === Evaluasi dengan no SMOTE ===
+# 1. Kumpulkan metrik dari kedua model
 metrics_no_prep <- final_no_prep %>%
-  collect_predictions() %>%
-  yardstick::metrics(truth = Y, estimate = .pred_class)
+  collect_metrics() %>% 
+  mutate(workflow = "No SMOTE")
 
-class_metrics_no_prep <- final_no_prep %>%
-  collect_predictions() %>%
-  yardstick::metric_set(accuracy, precision, recall, f_meas,bal_accuracy)(truth = Y, estimate = .pred_class)
-```
-
-```{r}
-# === Evaluasi dengan SMOTE ===
 metrics_smote <- final_smote %>%
-  collect_predictions() %>%
-  yardstick::metrics(truth = Y, estimate = .pred_class)
+  collect_metrics() %>% 
+  mutate(workflow = "SMOTE")
 
-class_metrics_smote <- final_smote %>%
-  collect_predictions() %>%
-  yardstick::metric_set(accuracy, precision, recall, f_meas,bal_accuracy)(truth = Y, estimate = .pred_class)
+# 2. Gabungkan, filter hanya akurasi, dan format
+perbandingan_akurasi <- bind_rows(metrics_no_prep, metrics_smote) %>%
+  filter(.metric == "accuracy") %>%
+  select(Workflow = workflow, Akurasi = .estimate) %>%
+  # (Opsional) Format angka jadi persentase
+  mutate(Akurasi = scales::percent(Akurasi, accuracy = 0.01))
+
+# 3. Tampilkan tabel dengan judul
+knitr::kable(
+  perbandingan_akurasi,
+  caption = "Perbandingan Akurasi Final pada Data Uji"
+)
 ```
 
-```{r}
-# === Bandingkan hasil ===
-metrics_no_prep
-class_metrics_no_prep
-```
+Berdasarkan perbandingan langsung pada data uji, workflow SMOTE terbukti menjadi pemenang yang jelas.
 
-```{r}
-metrics_smote
-class_metrics_smote
+Meskipun akurasi keseluruhan `beda sedikit`, model `SMOTE` menunjukkan **Balanced Accuracy** yang jauh lebih superior dan **Recall** yang jauh lebih baik untuk kelas minoritas 'C'. Ini membuktikan bahwa untuk dataset ini, `[penanganan imbalance (SMOTE) dan normalisasi]` sangat krusial untuk menciptakan model yang adil dan akurat.
 
-```
+# Kesimpulan
+
+Metode K-Nearest Neighbour dengan penanganan *imbalance* **SMOTE** (ditambah normalisasi) memiliki kemampuan **yang lebih superior dan seimbang (adil)** dalam mengklasifikasikan Peringkat Akreditasi (A, B, dan C) dibandingkan model yang dilatih pada data asli (`No SMOTE`).
+
+Evaluasi akhir menunjukkan bahwa model `SMOTE` adalah pemenang yang jelas karena:
+
+1.  **Kinerja Kelas Minoritas Jauh Lebih Baik:** Model `SMOTE` menunjukkan nilai **Balanced Accuracy** dan **Recall** (untuk kelas minoritas 'C') yang jauh lebih tinggi. Ini membuktikan bahwa model tersebut berhasil "belajar" untuk mengidentifikasi kelas yang sulit dan tidak hanya menebak kelas mayoritas.
+
+2.  **Model yang Lebih Fungsional:** Model `No SMOTE` mungkin memiliki akurasi yang tampak tinggi, tetapi ini adalah "akurasi palsu" yang didapat dari kegagalannya mengenali kelas minoritas. Model `SMOTE` menghasilkan model yang secara fungsional jauh lebih berguna dan adil di dunia nyata.
+
+Untuk studi kasus ini, terbukti bahwa penanganan *imbalance* data menggunakan SMOTE dan normalisasi data adalah langkah yang **wajib dan krusial** untuk menghasilkan model KNN yang valid.
