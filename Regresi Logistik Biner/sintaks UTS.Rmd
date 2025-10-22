@@ -74,7 +74,7 @@ Kita memanggil data dari file Excel. Sesuaikan dengan path file masing-masing
 library(readxl)
 
 # panggil data keseluruhan
-data <- read_excel("C:/Users/nabil/Downloads/Pemodelan Klasifikasi/Prepare UTS/data UTS 2024.xlsx")
+data <- read_excel("data UTS 2024.xlsx")
 
 ```
 
@@ -572,23 +572,3 @@ Untuk penelitian selanjutnya, akan sangat menarik untuk membangun model yang leb
 Terima kasih telah mengikuti analisis ini. Semoga *notebook* ini memberikan wawasan yang berharga tentang faktor-faktor yang membentuk lanskap mutu pendidikan di wilayah ini.
 
 \- Sincerely, Nabila Syukri
-
-```{r}
-install.packages("usethis")
-```
-```{r}
-library(usethis)
-use_git_config(user.name = "nabilasyukrii", user.email = "nabilasyukrilela@gmail.com")
-```
-
-```{r}
-usethis::create_github_token()
-```
-```{r}
-gitcreds::gitcreds_set()
-```
-
-```{r}
-usethis::create_from_github("nabilasyukrii/Analisis-Klasifikasi")
-```
-
