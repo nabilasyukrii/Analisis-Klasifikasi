@@ -1,0 +1,594 @@
+---
+title: "Regresi Logistik Biner"
+author: "Nabila Syukri"
+date: "2025-10-10"
+output: 
+  rmdformats::readthedown:
+    toc_depth: 2      
+    number_sections: false
+    self_contained: true
+    highlight: kate
+    thumbnails: false
+---
+
+# Pendahuluan
+
+## Latar Belakang: Membedah Faktor Penentu Peringkat Akreditasi Sekolah
+
+Mutu pendidikan adalah fondasi kemajuan suatu bangsa. Di Indonesia, salah satu instrumen utama untuk mengukur dan menjamin mutu satuan pendidikan adalah melalui proses **akreditasi** yang diselenggarakan oleh Badan Akreditasi Nasional Sekolah/Madrasah (BAN-S/M). Peringkat akreditasi (A, B, C, atau Belum Terakreditasi) tidak hanya menjadi cerminan kualitas, tetapi juga seringkali menjadi dasar bagi pemberian bantuan, kepercayaan publik, dan evaluasi kebijakan.
+
+Namun, faktor apa saja yang secara signifikan berkontribusi terhadap pencapaian peringkat tersebut? Apakah ada pola yang jelas?
+
+Menggunakan data sekunder hasil akreditasi dari suatu provinsi (disimpan dalam file `data uts 2024.xlsx`), analisis ini bertujuan untuk menjawab pertanyaan tersebut secara statistik. Kita akan menyelidiki bagaimana tiga karakteristik dasar satuan pendidikan—**Jenjang Pendidikan** (misalnya SD, SMP, SMA), **Tipe Sekolah** (misalnya Sekolah Umum vs. Madrasah), dan **Status Sekolah** (Negeri vs. Swasta)—berhubungan atau memengaruhi Peringkat Akreditasi yang diperoleh.
+
+## Tujuan Analisis
+
+Karena variabel dependen kita (Peringkat Akreditasi) hanya tersedia 2 faktor yaitu (A atau B) maka pendekatan yang paling tepat adalah menggunakan model **Regresi Logistik Biner**.
+
+Dalam RPubs ini, kita akan memandu Anda melalui seluruh proses analisis data menggunakan R, yang mencakup:
+
+1.  **Eksplorasi Data (EDA):** Memvisualisasikan distribusi data akreditasi dan hubungannya dengan setiap faktor.
+
+2.  **Pengembangan Model:** Membangun model regresi logistik bineruntuk menduga peringkat akreditasi berdasarkan ketiga variabel prediktor.
+
+3.  **Evaluasi Model:** Menilai seberapa baik dan akurat model yang telah kita bangun dalam memprediksi peringkat.
+
+4.  **Simulasi & Interpretasi:**
+
+    -   Melakukan studi kasus untuk memprediksi peluang sebuah satuan pendidikan baru (SD Negeri) dalam memperoleh peringkat 'A'.
+
+    -   Menghitung *Odds Ratio* untuk memahami seberapa besar kemungkinan 'Sekolah Umum' mendapatkan peringkat 'A' dibandingkan dengan 'Madrasah'.
+
+Analisis ini diharapkan dapat memberikan wawasan berbasis data bagi para pemangku kepentingan—mulai dari peneliti, pengambil kebijakan, hingga penyelenggara pendidikan—tentang faktor-faktor kunci yang terkait dengan mutu sekolah di wilayah tersebut.
+
+# Hasil dan Pembahasan
+
+## 1. Persiapan Data dan Library
+
+### 1.1. Muat Library
+
+Pertama, kita memuat semua *library* yang diperlukan untuk analisis ini.
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(rsample)
+library(caret)
+library(ggplot2)
+library(broom)
+library(pscl)
+library(reshape2)
+library(pROC)
+library(tidyverse)
+library(tidymodels)
+library(DataExplorer)
+library(VGAM)
+library(broom.helpers)
+```
+
+### 1.2. Muat Data
+
+Kita memanggil data dari file Excel. Sesuaikan dengan path file masing-masing
+
+```{r}
+library(readxl)
+
+# panggil data keseluruhan
+data <- read_excel("C:/Users/nabil/Downloads/Pemodelan Klasifikasi/Prepare UTS/data UTS 2024.xlsx")
+
+```
+
+### 1.3. Struktur Data Awal
+
+Kita gunakan `glimpse()` untuk melihat struktur data awal.
+
+```{r}
+glimpse(data)
+```
+
+Data terdiri dari 885 observasi dan 5 kolom. Kolom `Peringkat` dan variabel prediktor lainnya masih dalam format `character`.
+
+### 1.4. Pembersihan dan Transformasi Data
+
+Kita akan membersihkan data dengan membuang kolom `No` yang tidak relevan dan mengubah semua variabel `character` menjadi `factor`, yang merupakan format yang dibutuhkan untuk pemodelan.
+
+```{r}
+# 1. Pilih data yang relevan
+data <- data %>% select(-No)
+
+# 2. Ubah semua kolom character menjadi factor
+data <- data %>% 
+      mutate(across(where(is.character), as.factor))
+
+# 3. Cek struktur data setelah transformasi
+str(data)
+```
+
+## 2. Eksplorasi Data
+
+Kita mulai dengan melihat distribusi dari variabel target kita, yaitu `Peringkat`.
+
+### 2.1. Distribusi Peringkat Akreditasi (Bar Chart)
+
+Visualisasi pertama adalah bar chart untuk melihat jumlah dan persentase setiap peringkat.
+
+```{r}
+# Distribusi Peringkat Akreditasi + Persentase
+ggplot(data, aes(x = Peringkat, fill = Peringkat)) +
+  geom_bar() +
+  geom_text(
+    stat = "count",
+    aes(
+      label = paste0(
+        after_stat(count), " (",
+        round(after_stat(count) / sum(after_stat(count)) * 100, 2), "%)"
+      )
+    ),
+    vjust = -0.5, size = 4
+  ) +
+  theme_classic() +
+  labs(
+    title = "Distribusi Peringkat Akreditasi",
+    x = "Peringkat Akreditasi",
+    y = "Jumlah Sekolah"
+  )
+```
+
+### 2.2. Distribusi Peringkat Akreditasi (Pie Chart)
+
+Sebagai alternatif, kita juga bisa melihatnya dalam bentuk *pie chart*.
+
+```{r}
+
+# --- 1. Hitung frekuensi dan persentase
+data_pie <- data %>%
+  count(Peringkat) %>%
+  mutate(prop = n / sum(n) * 100)
+
+# --- 2. Plot pie chart
+ggplot(data_pie, aes(x = "", y = prop, fill = Peringkat)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  geom_text(
+    aes(label = paste0(round(prop, 2), "%")),
+    position = position_stack(vjust = 0.5),
+    size = 4
+  ) +
+  theme_void() +
+  labs(
+    title = "Distribusi Peringkat Akreditasi (Diagram Lingkaran)",
+    fill = "Peringkat Akreditasi"
+  )
+```
+
+### 2.3 Hubungan Prediktor dengan Target
+
+```{r}
+# 1. Jenjang vs Peringkat
+ggplot(data, aes(x = Jenjang, fill = Peringkat)) +
+  geom_bar(position = "fill") +
+  theme_classic() +
+  labs(
+    title = "Proporsi Peringkat Akreditasi berdasarkan Jenjang",
+    x = "Jenjang Pendidikan",
+    y = "Proporsi"
+  )
+
+# 2. Tipe Sekolah vs Peringkat
+ggplot(data, aes(x = `Tipe Sekolah`, fill = Peringkat)) +
+  geom_bar(position = "fill") +
+  theme_classic() +
+  labs(
+    title = "Proporsi Peringkat Akreditasi berdasarkan Tipe Sekolah",
+    x = "Tipe Sekolah",
+    y = "Proporsi"
+  )
+
+# 3. Status Sekolah vs Peringkat
+ggplot(data, aes(x = `Status Sekolah`, fill = Peringkat)) +
+  geom_bar(position = "fill") +
+  theme_classic() +
+  labs(
+    title = "Proporsi Peringkat Akreditasi berdasarkan Status Sekolah",
+    x = "Status Sekolah",
+    y = "Proporsi"
+  )
+
+```
+
+-   **Jenjang:** Dari plot pertama, kita bisa melihat secara visual bahwa proporsi Peringkat 'A' (biru muda) tampak **meningkat** seiring dengan naiknya jenjang, dari SD/MI ke SMA/MA. Ini adalah indikasi kuat bahwa `Jenjang` akan menjadi prediktor yang signifikan.
+
+-   **Tipe Sekolah:** Terlihat bahwa 'Sekolah' (non-madrasah) memiliki proporsi Peringkat 'A' yang lebih tinggi dibandingkan 'Madrasah'.
+
+-   **Status Sekolah:** Proporsi Peringkat 'A' pekolah 'Negeri' hampir sama dengan 'Swasta'.
+
+## 3. Bangun Model Regresi Logistik
+
+Kita akan menjawab **Pertanyaan 1: Kembangkan model untuk menduga peringkat akreditasi.**
+
+### 3.1. Persiapan Variabel untuk Model
+
+Kita perlu mengatur variabel `factor` kita agar memiliki level referensi yang sesuai.
+
+-   `Peringkat`: Kita atur `B` sebagai referensi. Ini berarti model akan memprediksi peluang untuk mendapatkan `A` (sukses) dibandingkan `B` (gagal).
+
+-   `Status Sekolah`: Kita atur `Swasta` sebagai referensi.
+
+-   `Tipe Sekolah`: Kita atur `Madrasah` sebagai referensi.
+
+```{r}
+
+## 1. Persiapan Data
+# Ubah tipe variabel ke faktor & set reference level
+data <- data %>%
+  mutate(
+    Peringkat = factor(Peringkat, levels = c("B", "A")),  # "B" = reference
+    Jenjang = factor(Jenjang, levels = c("SD/MI", "SMP/MTS", "SMA/MA")),
+    `Status Sekolah` = relevel(factor(`Status Sekolah`), ref = "Swasta"),
+    `Tipe Sekolah` = relevel(factor(`Tipe Sekolah`), ref = "Madrasah")
+  )
+
+# Simpan level target
+levels_target <- levels(data$Peringkat)
+
+# Cek referensi baru
+str(data)
+```
+
+Karena referensi diatur ke `B`, model akan memprediksi $P(Peringkat=A)$. Dengan kata lain, setiap koefisien positif menunjukkan peningkatan peluang untuk menjadi `A` (dibandingkan tetap di `B`).
+
+### 3.2. Pembagian Data (Split Data)
+
+Kita membagi data menjadi 80% data latih (*training*) dan 20% data uji (*testing*), dengan stratifikasi berdasarkan `Peringkat` agar proporsinya terjaga.
+
+```{r}
+## 2. Split Data
+set.seed(123)
+split <- initial_split(data, prop = 0.8, strata = Peringkat)
+train_data <- training(split)
+test_data  <- testing(split)
+```
+
+### 3.3. Pelatihan Model (Training)
+
+Kita melatih model Regresi Logistik Binomial menggunakan fungsi `glm()` (Generalized Linear Model).
+
+-   **Formula `Peringkat ~ .`**: Ini memberitahu R untuk memprediksi (`~`) variabel `Peringkat` menggunakan semua variabel prediktor lainnya (`.`) yang ada di data latih (yaitu `Jenjang`, `Tipe Sekolah`, dan `Status Sekolah`).
+
+-   **`family = binomial`**: Ini adalah parameter kunci yang mendefinisikan model ini sebagai **regresi logistik**. Kita menggunakannya karena variabel `Peringkat` kita memiliki dua hasil (biner), yaitu 'A' dan 'B'. Model ini akan menghitung probabilitas (peluang) untuk hasil 'sukses', yang telah kita tetapkan sebagai Peringkat 'A' (karena 'B' adalah referensi).
+
+-   **`data = train_data`**: Model ini hanya "belajar" dari set data latih.
+
+```{r}
+## 3. Training Model
+
+model <- glm(Peringkat ~ ., data = train_data, family = binomial)
+summary(model)
+
+
+```
+
+**Interpretasi `summary(model)`**
+
+**Persamaan Model Logit**
+
+Berdasarkan koefisien `Estimate` di atas, model matematika yang kita kembangkan adalah:
+
+$\text{logit}(p) = \beta_0 + \beta_1X_1 + \beta_2X_2 + \beta_3X_3 + \beta_4X_4$
+
+Di mana:
+
+-   $p$ adalah $P(\text{Peringkat} = A)$
+
+-   $\text{logit}(p) = \ln\left(\frac{p}{1-p}\right)$
+
+-   $X_1 = 1$ jika `Jenjang` = SMP/MTS, $0$ jika lainnya
+
+-   $X_2 = 1$ jika `Jenjang` = SMA/MA, $0$ jika lainnya
+
+-   $X_3 = 1$ jika `Tipe Sekolah` = Sekolah, $0$ jika Madrasah
+
+-   $X_4 = 1$ jika `Status Sekolah` = Negeri, $0$ jika Swasta
+
+#### a. Coefficients (Koefisien)
+
+Tabel ini menunjukkan "bobot" atau pengaruh setiap variabel terhadap hasil.
+
+-   **`Estimate` (**$\beta$**)**: Ini adalah koefisien **log-odds**. Nilai positif berarti variabel tersebut meningkatkan *log-odds* (dan peluang) untuk mendapatkan Peringkat 'A', sedangkan nilai negatif menurunkannya.
+
+    -   **`(Intercept)` [-1.6538]**: Ini adalah *log-odds* untuk kategori *baseline* (referensi). *Baseline* kita adalah: **SD/MI** (`Jenjang`), **Madrasah** (`Tipe Sekolah`), dan **Swasta** (`Status Sekolah`). Jadi, *log-odds* Madrasah Swasta jenjang SD/MI untuk mendapat peringkat 'A' adalah -1.6538 (sangat rendah).
+
+    -   **`JenjangSMP/MTS` [0.6462]**: Dibandingkan dengan SD/MI, menjadi SMP/MTS meningkatkan *log-odds* mendapat peringkat 'A' sebesar 0.6462.
+
+    -   **`JenjangSMA/MA` [1.3585]**: Dibandingkan dengan SD/MI, menjadi SMA/MA meningkatkan *log-odds* mendapat peringkat 'A' sebesar 1.3585. (Ini pengaruh positif terkuat).
+
+    -   **`Tipe Sekolah`Sekolah [0.6105]**: Dibandingkan dengan 'Madrasah', menjadi 'Sekolah' (non-madrasah) meningkatkan *log-odds* mendapat 'A' sebesar 0.6105.
+
+    -   **`Status Sekolah`Negeri [0.4925]**: Dibandingkan dengan 'Swasta', menjadi 'Negeri' meningkatkan *log-odds* mendapat 'A' sebesar 0.4925.
+
+#### b. Significance (Signifikansi Statistik)
+
+-   **`Pr(>|z|)` (p-value)**: Ini memberi tahu kita apakah pengaruh variabel tersebut "nyata" (signifikan secara statistik) atau kemungkinan hanya kebetulan. Kita membandingkannya dengan tingkat signifikansi ($\alpha$), biasanya 0.05 (5%).
+
+    -   `JenjangSMP/MTS` (p=0.03), `JenjangSMA/MA` (p=0.0002), dan `Tipe Sekolah` (p=0.014) semuanya memiliki p-value **\< 0.05**. Ini ditandai dengan `*` atau `***`. Artinya, variabel-variabel ini memiliki **pengaruh yang signifikan secara statistik** terhadap peringkat akreditasi.
+
+    -   `Status Sekolah`Negeri (p=0.0917) memiliki p-value **\> 0.05**. Ini berarti, pada tingkat kepercayaan 95%, variabel status sekolah (Negeri vs. Swasta) **tidak memiliki pengaruh yang signifikan secara statistik** dalam model ini, meskipun ada sedikit tren positif (ditandai dengan `.`).
+
+#### c. Model Fit (Kebaikan Model)
+
+-   **`AIC` (Akaike Information Criterion) [943.22]**: Ini adalah ukuran seberapa baik model tersebut "pas" dengan data, sekaligus memberikan penalti jika model terlalu rumit (terlalu banyak variabel). Nilai ini tidak memiliki arti absolut, tetapi sangat berguna untuk membandingkan model. Semakin rendah nilai AIC, semakin baik modelnya.
+
+**Model Final:**
+
+\$\$\\text{logit}(p) = -1.6538 + 0.6462(\\text{Jenjang:SMP/MTS}) + 1.3585(\\text{Jenjang:SMA/MA}) + 0.6105(\\text{Tipe:Sekolah}) + 0.4925(\\text{Status:Negeri})\$\$
+
+**"Jika ada satuan Pendidikan baru yaitu SD Negeri, berapa peluangnya memperoleh akreditasi A?"**
+
+> Untuk SD Negeri:
+>
+> Jenjang = SD/MI \$\\rightarrow\$ 0 (karena baseline)
+>
+> Tipe Sekolah = Madrasah \$\\rightarrow\$ 0 (karena baseline)
+>
+> Status Sekolah = Negeri \$\\rightarrow\$ 1 (Koefisien: 0.4925)
+>
+> logit(p) = -1.6538 + 0.4925(1) = -1.1613
+>
+> Peluang = 23.8%
+
+Satuan pendidikan "SD" (Sekolah Dasar) logikanya termasuk dalam kategori `Tipe Sekolah = Sekolah` (non-madrasah)
+
+Oleh karena itu, kita harus memasukkan koefisien untuk `Tipe Sekolah` *dan* `Status Sekolah` ke dalam perhitungan.
+
+-   **Jenjang** = SD/MI (Baseline $\rightarrow$ Koefisien = 0)
+
+-   **Tipe Sekolah** = Sekolah (Bukan baseline $\rightarrow$ Koefisien = 0.6105)
+
+-   **Status Sekolah** = Negeri (Bukan baseline $\rightarrow$ Koefisien = 0.4925)
+
+Maka, $logit(p)$ dihitung sebagai:
+
+\$\$\\text{logit}(p) = \\text{Intercept} + \\beta\_{\\text{SD/MI}} + \\beta\_{\\text{Sekolah}} + \\beta\_{\\text{Negeri}}\$\$
+
+\$\$\\text{logit}(p) = -1.6538 + 0 + 0.6105 + 0.4925\$\$
+
+\$\$\\text{logit}(p) = -0.5508\$\$
+
+Sekarang kita konversi *log-odds* ini ke peluang ($p$):
+
+\$\$p = \\frac{e\^{-0.5508}}{1 + e\^{-0.5508}} = \\frac{0.5765}{1 + 0.5765} = 0.3657\$\$
+
+Jadi, peluang satuan pendidikan baru (SD Negeri) memperoleh akreditasi A (dibanding B) adalah sekitar 36.6%.
+
+### 3.4 Odds Ratio
+
+```{r}
+
+# Hitung Odds Ratio (exp(β))
+exp(coef(model))
+
+```
+
+Dari output OR (Odds Ratio), kita bisa melihat:
+
+Tipe Sekolah : `Sekolah` (OR = 1.84): Seperti yang kita bahas, 'Sekolah' memiliki odds 1.84x lipat untuk dapat 'A' dibanding 'Madrasah'.
+
+Jenjang `SMP/MTS` (OR = 1.91): SMP/MTS memiliki odds 1.91x lipat lebih besar untuk dapat 'A' dibanding SD/MI (baseline).
+
+Jenjang `SMA/MA` (OR = 3.89): Ini adalah pengaruh terkuat! SMA/MA memiliki odds hampir 4 kali lipat lebih besar untuk mendapat peringkat 'A' dibandingkan SD/MI.
+
+Status Sekolah `Negeri` (OR = 1.64): Sekolah 'Negeri' memiliki odds 1.64x lipat untuk dapat 'A' dibanding 'Swasta'. (Namun, ingat, variabel ini secara statistik tidak signifikan (p=0.09), jadi kita harus berhati-hati dalam menyimpulkan pengaruhnya).
+
+## 4. Evaluasi Kebaikan Model
+
+### 4.1. Membuat Prediksi
+
+Pertama, kita gunakan fungsi `predict()` pada model yang telah kita latih.
+
+-   `type = "response"`: Ini penting karena kita meminta model regresi logistik untuk mengeluarkan **probabilitas** (peluang) $P(\text{Peringkat} = A)$, yang nilainya antara 0 dan 1.
+
+-   Kita membuat prediksi pada `train_data` (untuk memeriksa *overfitting*) dan `test_data` (untuk menilai performa sebenarnya).
+
+-   Karena outputnya adalah probabilitas, kita perlu mengubahnya menjadi kelas kategori ('A' atau 'B'). Kita gunakan ambang batas (threshold) standar **0.5**. Jika probabilitas \> 0.5, kita klasifikasikan sebagai 'A'; jika tidak, sebagai 'B'.
+
+```{r}
+## ===========================
+## 4. Prediksi
+## ===========================
+
+pred_train <- predict(model, type = "response")
+pred_test  <- predict(model, newdata = test_data, type = "response")
+
+# Ubah probabilitas jadi kelas (threshold 0.5)
+pred_train_class <- ifelse(pred_train > 0.5, levels_target[2], levels_target[1])
+pred_test_class  <- ifelse(pred_test  > 0.5, levels_target[2], levels_target[1])
+```
+
+### 4.2. Confusion Matrix
+
+Sekarang kita memiliki prediksi kelas (`pred_test_class`) dan data aktual (`test_data$Peringkat`). Kita dapat membandingkan keduanya menggunakan *Confusion Matrix* dari paket `caret`.
+
+*Confusion Matrix* adalah tabel yang merangkum kinerja model:
+
+-   **True Positive (TP)**: Aktual 'A', Prediksi 'A'
+
+-   **True Negative (TN)**: Aktual 'B', Prediksi 'B'
+
+-   **False Positive (FP)**: Aktual 'B', Prediksi 'A' (Kesalahan Tipe I)
+
+-   **False Negative (FN)**: Aktual 'A', Prediksi 'B' (Kesalahan Tipe II)
+
+```{r}
+ ## ===========================
+## 5. Evaluasi (Confusion Matrix)
+## ===========================
+
+cm_train <- confusionMatrix(
+  factor(pred_train_class, levels = levels_target),
+  train_data$Peringkat
+)
+
+cm_test <- confusionMatrix(
+  factor(pred_test_class, levels = levels_target),
+  test_data$Peringkat
+)
+
+# Tampilkan hasil
+print("--- Confusion Matrix (Data Latih) ---")
+cm_train
+
+print("--- Confusion Matrix (Data Uji) ---")
+cm_test
+```
+
+```{r}
+library(ggplot2)
+
+# Confusion matrix test data
+cm <- confusionMatrix(factor(pred_test_class, levels = levels_target),
+                      test_data$Peringkat)
+
+# Ubah jadi dataframe untuk plotting
+cm_df <- as.data.frame(cm$table)
+colnames(cm_df) <- c("Predicted", "Actual", "Freq")
+
+# Plot pakai ggplot
+ggplot(cm_df, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), size = 6, color = "white") +
+  scale_fill_gradient(low = "#b3cde3", high = "#011f4b") +
+  labs(title = "Confusion Matrix (Test Data)",
+       x = "Actual Class",
+       y = "Predicted Class") +
+  theme_minimal(base_size = 14)
+
+```
+
+### 4.3. Analisis Kebaikan Model
+
+Output `cm_test` (Confusion Matrix Data Uji) adalah ukuran utama kita untuk "kebaikan model", karena ini mengukur performa model pada data yang belum pernah dilihat sebelumnya.
+
+-   **Accuracy (Akurasi): `[0.6497]`**
+
+    -   Ini adalah metrik utama: persentase total prediksi yang benar. (TP + TN) / Total.
+
+    -   *Interpretasi:* "Secara keseluruhan, model kami mampu memprediksi peringkat akreditasi dengan benar sebanyak `[64.97]`% pada data baru."
+
+-   **Pengecekan Overfitting:**
+
+    -   Akurasi Data Latih 64.12% dengan Akurasi Data Uji 64.97%
+
+    -   *Interpretasi Ideal:* "Akurasi data latih nilainya sangat berdekatan. Ini menunjukkan model kita **tidak *overfitting*** dan dapat menggeneralisasi dengan baik."
+
+-   **Sensitivity (Sensitivitas): `[0.9346]`**
+
+    -   Ini adalah *True Positive Rate* (Recall). Metrik ini mengevaluasi kelas Positif ('A').
+
+    -   *Interpretasi:* "Dari semua sekolah yang *sebenarnya* berperingkat 'A', model kami berhasil mengidentifikasi 93.46% di antaranya dengan benar."
+
+-   **Specificity (Spesifisitas): `[0.1929]`**
+
+    -   Ini adalah *True Negative Rate*. Metrik ini mengevaluasi kelas Negatif ('B').
+
+    -   *Interpretasi:* "Dari semua sekolah yang *sebenarnya* berperingkat 'B', model kami berhasil mengidentifikasi 19.29% di antaranya dengan benar."
+
+```{r}
+# Muat library
+library(pROC)
+
+# 1. Buat objek ROC
+# test_data$Peringkat adalah data aktual (ground truth)
+# pred_test adalah probabilitas yang kita prediksi
+roc_obj <- roc(test_data$Peringkat, pred_test)
+
+# 2. Plot ROC Curve
+plot(roc_obj, 
+     col = "blue", 
+     main = "ROC Curve - Logistic Regression",
+     print.auc = TRUE) # Menambahkan nilai AUC langsung ke plot
+
+```
+
+ROC (Receiver Operating Characteristic) Curve: Ini adalah plot yang memvisualisasikan kemampuan model kita dalam membedakan antara kelas 'A' dan 'B'. Plot ini menunjukkan Sensitivity (True Positive Rate) pada sumbu Y vs. 1 - Specificity (False Positive Rate) pada sumbu X.
+
+Kurva Biru: Ini adalah kinerja model kita. Semakin kurva "membungkuk" ke arah sudut kiri atas, semakin baik modelnya.
+
+```{r}
+# 3. Hitung dan tampilkan nilai AUC
+auc_value <- auc(roc_obj)
+print(paste("Area Under the Curve (AUC):", round(auc_value, 4)))
+```
+
+Analisis Kebaikan Model (Berdasarkan AUC) AUC (Area Under the Curve): Ini adalah nilai tunggal (antara 0 dan 1) yang merangkum seberapa baik kurva ROC tersebut. Nilai ini bisa diartikan sebagai probabilitas bahwa model akan memberikan skor (probabilitas) yang lebih tinggi kepada pengamatan 'A' yang dipilih secara acak dibandingkan pengamatan 'B' yang dipilih secara acak.
+
+Nilai AUC memberi kita skor ringkasan untuk "kebaikan model":
+
+-   **1.0 - 0.9:** Luar biasa (*Outstanding*)
+
+-   **0.9 - 0.8:** Sangat Baik (*Excellent*)
+
+-   **0.8 - 0.7:** Baik / Dapat Diterima (*Acceptable / Good*)
+
+-   **0.7 - 0.6:** Cukup (*Fair*)
+
+-   **0.6 - 0.5:** Buruk (*Poor*)
+
+-   **0.5:** Tidak ada diskriminasi (sama dengan menebak acak)
+
+Berdasarkan nilai AUC = 0.6, model ini memiliki kemambuan Baik dalam membedakan antara sekolah yang memperoleh peringkat A dan B.
+
+# Kesimpulan
+
+Analisis ini dimulai dengan pertanyaan sederhana: Apakah jenjang, tipe, dan status sekolah berpengaruh terhadap peringkat akreditasinya?
+
+Melalui pemodelan regresi logistik, data telah memberikan jawaban yang jelas: **Ya, karakteristik dasar sekolah memainkan peran yang signifikan secara statistik.**
+
+**Temuan Kunci (The "What")**
+
+1.  **Model yang Valid:** Kita berhasil mengembangkan model klasifikasi biner dengan performa yang baik (Akurasi Uji 64.97% dan AUC 0.60). Model ini mampu membedakan sekolah yang berpotensi mendapat peringkat 'A' dan 'B' lebih baik daripada tebakan acak.
+
+2.  **Jenjang adalah Pendorong Terkuat:** Faktor terpenting dalam model ini adalah jenjang pendidikan. Sebuah sekolah SMA/MA memiliki *odds* **3.89 kali lipat** lebih besar untuk meraih peringkat 'A' dibandingkan SD/MI.
+
+3.  **Tipe Sekolah Berpengaruh:** 'Sekolah' (non-madrasah) memiliki *odds* **1.84 kali lipat** lebih besar untuk mendapatkan peringkat 'A' dibandingkan 'Madrasah', bahkan setelah mengontrol faktor jenjang dan status.
+
+4.  **Prediksi Studi Kasus:** Berdasarkan model ini, sebuah 'SD Negeri' baru (yang merupakan 'Sekolah' Tipe 'Negeri') diprediksi memiliki peluang **36.6%** untuk memperoleh akreditasi 'A'.
+
+**Implikasi (The "So What?")**
+
+Temuan ini bukan sekadar angka di atas kertas. Mereka memiliki implikasi di dunia nyata:
+
+-   **Untuk Pembuat Kebijakan:** Adanya perbedaan *odds* yang signifikan (terutama antara 'Sekolah' vs 'Madrasah' dan 'SMA/MA' vs 'SD/MI') menunjukkan bahwa upaya dan sumber daya untuk peningkatan mutu mungkin perlu difokuskan secara berbeda. Kelompok dengan *odds* lebih rendah (misalnya Madrasah atau SD/MI) mungkin memerlukan intervensi atau dukungan tambahan untuk "mengejar" standar akreditasi 'A'.
+
+**Keterbatasan dan Arah Selanjutnya (The "What's Next?")**
+
+Penting untuk bersikap jujur tentang apa yang *tidak* dapat dilakukan oleh model ini:
+
+1.  **Keterbatasan Variabel:** Model kita relatif sederhana. Peringkat akreditasi di dunia nyata tentu dipengaruhi oleh faktor-faktor yang lebih kompleks yang tidak ada dalam data kita (misalnya, jumlah guru bersertifikasi, ketersediaan fasilitas, anggaran sekolah, atau lokasi geografis).
+
+2.  **Generalisasi:** Data ini berasal dari satu provinsi. Hasil ini mungkin tidak dapat digeneralisasi sepenuhnya ke provinsi lain dengan demografi dan kebijakan yang berbeda.
+
+Untuk penelitian selanjutnya, akan sangat menarik untuk membangun model yang lebih kaya dengan memasukkan prediktor-prediktor tersebut. Selain itu, penggunaan teknik *machine learning* yang lebih canggih (seperti Random Forest atau Gradient Boosting) dapat dieksplorasi untuk melihat apakah kita dapat meningkatkan akurasi prediksi.
+
+Terima kasih telah mengikuti analisis ini. Semoga *notebook* ini memberikan wawasan yang berharga tentang faktor-faktor yang membentuk lanskap mutu pendidikan di wilayah ini.
+
+\- Sincerely, Nabila Syukri
+
+```{r}
+install.packages("usethis")
+```
+```{r}
+library(usethis)
+use_git_config(user.name = "nabilasyukrii", user.email = "nabilasyukrilela@gmail.com")
+```
+
+```{r}
+usethis::create_github_token()
+```
+```{r}
+gitcreds::gitcreds_set()
+```
+
+```{r}
+usethis::create_from_github("nabilasyukrii/Analisis-Klasifikasi")
+```
+
