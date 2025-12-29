@@ -18,7 +18,7 @@ This repository contains distinct projects demonstrating different statistical m
 * **Goal:** Segmenting data based on similarities to identify patterns without predefined labels.
 * **Method:** K-Means Algorithm, Elbow Method for optimal $k$.
 * **Key Insight:** Successfully grouped data into 3 distinct clusters based on behavioral characteristics.
-* **📂 [Go to Project Folder](./01_Customer_Segmentation_KMeans)**
+* **📂 [Go to Project Folder](./KNN)**
 
 ### 2. [Supervised] Logistic Regression Classification
 * **Goal:** Predicting categorical outcomes (Binary Classification) based on independent variables.
